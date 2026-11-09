@@ -29,6 +29,7 @@ use windows::Win32::System::SystemInformation::{
 use windows::core::PCWSTR;
 
 use crate::sensors::chips::{match_profile, ChipProfile, Detection, MatchBasis};
+use crate::sensors::core_tiers::classes_to_kinds;
 use crate::sensors::identity::{self, CpuIdentity};
 use crate::sensors::types::{
     kelvin_tenths_to_c, CoreKind, CoreReading, SensorSnapshot, ZoneReading, VALID_ZONE_MIN_KELVIN,
@@ -326,24 +327,6 @@ fn query_core_efficiency_classes(logical_cores: u32) -> Option<Vec<u8>> {
     }
 }
 
-/// Maps each core's raw EfficiencyClass byte (in core-index order) to a P/E
-/// `CoreKind`: cores at the highest class present become `Performance`,
-/// every lower class becomes `Efficiency`. A single distinct class
-/// (homogeneous chip — X1 Elite, X2P-42) maps everything to `Performance`.
-fn classes_to_kinds(classes: &[u8]) -> Vec<CoreKind> {
-    let max = classes.iter().copied().max().unwrap_or(0);
-    classes
-        .iter()
-        .map(|&c| {
-            if c == max {
-                CoreKind::Performance
-            } else {
-                CoreKind::Efficiency
-            }
-        })
-        .collect()
-}
-
 /// Real per-core P/E classification straight from the OS topology API.
 /// `None` falls back to the positional walk over the static profile's
 /// `clusters` table in `kind_for_core` below — see issue #2: a screenshot
@@ -352,8 +335,9 @@ fn classes_to_kinds(classes: &[u8]) -> Vec<CoreKind> {
 /// that evidence is secondhand and not solid enough to hardcode. Querying
 /// the live topology sidesteps needing to guess the enumeration order for
 /// any given chip at all.
-fn real_core_kinds(logical_cores: u32) -> Option<Vec<CoreKind>> {
-    query_core_efficiency_classes(logical_cores).map(|classes| classes_to_kinds(&classes))
+fn real_core_kinds(logical_cores: u32, per_core_mhz: &[u32]) -> Option<Vec<CoreKind>> {
+    query_core_efficiency_classes(logical_cores)
+        .map(|classes| classes_to_kinds(&classes, per_core_mhz))
 }
 
 fn kind_for_core(real_kinds: &Option<Vec<CoreKind>>, profile: &ChipProfile, idx: u32) -> CoreKind {
@@ -566,7 +550,7 @@ fn format_detection_report(identity: &CpuIdentity, profile: &ChipProfile, basis:
          Logical cores: {}\n\
          Per-core ~MHz: {:?}\n\
          Rated clock from name: {}\n\
-         OS core tiers (EfficiencyClass, higher = faster): {} faster-tier / {} slower-tier\n\
+         OS core tiers (resolved from EfficiencyClass + per-core ~MHz): {} performance / {} efficiency\n\
          --- Matched profile ---\n\
          Name: {}\n\
          Model: {}\n\
@@ -593,7 +577,11 @@ fn format_detection_report(identity: &CpuIdentity, profile: &ChipProfile, basis:
 
 fn worker(rx: mpsc::Receiver<Request>) {
     let logical = logical_core_count();
-    let real_kinds = real_core_kinds(logical);
+    // Read identity first: the per-core ~MHz values are needed to resolve
+    // which EfficiencyClass is actually the faster cluster on firmware like
+    // the Snapdragon 855, where the class numbering is inverted.
+    let mut cpu_identity = identity::gather(logical, None, None);
+    let real_kinds = real_core_kinds(logical, &cpu_identity.per_core_mhz);
     let (perf_cores, eff_cores) = match &real_kinds {
         Some(kinds) => (
             Some(kinds.iter().filter(|k| **k == CoreKind::Performance).count() as u32),
@@ -601,7 +589,8 @@ fn worker(rx: mpsc::Receiver<Request>) {
         ),
         None => (None, None),
     };
-    let cpu_identity = identity::gather(logical, perf_cores, eff_cores);
+    cpu_identity.perf_cores = perf_cores;
+    cpu_identity.eff_cores = eff_cores;
     let Detection { profile, basis } = match_profile(&cpu_identity);
     let mut stats: CoreStats = HashMap::new();
     let mut temp_stats: TempStats = None;
@@ -645,34 +634,6 @@ fn worker(rx: mpsc::Receiver<Request>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn classes_to_kinds_two_tier_highest_class_is_performance() {
-        // X2E-78-100 real topology per issue #2: 6 x Oryon P1 (efficiency
-        // class 0) + 6 x Oryon P2 (efficiency class 1) — order in the raw
-        // class list doesn't matter, only which class is highest.
-        let classes = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1];
-        let kinds = classes_to_kinds(&classes);
-        assert_eq!(kinds[..6], [CoreKind::Efficiency; 6]);
-        assert_eq!(kinds[6..], [CoreKind::Performance; 6]);
-    }
-
-    #[test]
-    fn classes_to_kinds_homogeneous_is_all_performance() {
-        // X1 Elite / X2P-42: a single Efficiency Class for every core.
-        let classes = [0u8; 8];
-        let kinds = classes_to_kinds(&classes);
-        assert!(kinds.iter().all(|k| *k == CoreKind::Performance));
-    }
-
-    #[test]
-    fn classes_to_kinds_three_tier_only_top_class_is_performance() {
-        // Hypothetical 3-tier topology: everything below the max class is
-        // Efficiency, not just the immediately-lower tier.
-        let classes = [0, 1, 2];
-        let kinds = classes_to_kinds(&classes);
-        assert_eq!(kinds, [CoreKind::Efficiency, CoreKind::Efficiency, CoreKind::Performance]);
-    }
 
     #[test]
     fn effective_clock_uses_the_fastest_core_not_a_blended_average() {

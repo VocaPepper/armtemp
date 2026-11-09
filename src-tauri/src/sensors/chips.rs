@@ -1,6 +1,6 @@
 //! Chip profiles for ARM64 CPUs seen on Windows on ARM: the Snapdragon X / X2
 //! families primarily, plus the legacy Qualcomm Kryo-based Windows-on-ARM
-//! lineup (Snapdragon 835/850/7c family/8c family/8cx family, Microsoft
+//! lineup (Snapdragon 835/850/855/7c family/8c family/8cx family, Microsoft
 //! SQ1-3) and Raspberry Pi (Windows-on-ARM community installs), with honest
 //! vendor-derived fallbacks for Broadcom/MediaTek/NVIDIA and anything else
 //! unrecognized. This is used to LABEL detected hardware (name, model,
@@ -153,7 +153,7 @@ pub struct Detection {
 ///
 /// Snapdragon X specs are sourced from Qualcomm's X/X2 Elite/Plus product
 /// briefs and notebookcheck's per-SKU pages. Legacy Qualcomm specs (835, 850,
-/// 7c family, 8c family, 8cx family, Microsoft SQ1-3) are sourced from
+/// 855, 7c family, 8c family, 8cx family, Microsoft SQ1-3) are sourced from
 /// Qualcomm/Microsoft product pages, Wikipedia's Snapdragon SoC list, and
 /// PassMark/HWiNFO-verified `ProcessorNameString` formats. Raspberry Pi specs
 /// are from Raspberry Pi's own documentation. TDP is unpublished for the
@@ -554,6 +554,26 @@ pub static CHIPS: &[ChipProfile] = &[
         core_naming: CoreNaming::PerformanceEfficiency,
     },
     ChipProfile {
+        id: "SM8150",
+        name: "Snapdragon 855",
+        // Surface Duo firmware reports "Snapdragon (TM) 855 @ 2.84 GHz".
+        // `normalized_name` drops the parenthesized (TM), leaving
+        // "snapdragon855" for this token.
+        model_match: "snapdragon855",
+        model: "SM8150",
+        tjmax_c: 100.0,
+        base_ghz: 0.0,
+        boost_ghz: 2.84,
+        tdp_w: 0,
+        // 1x Kryo 485 Gold Prime (2.84 GHz) + 3x Kryo 485 Gold (2.42 GHz)
+        // + 4x Kryo 485 Silver (1.78 GHz). The two-tier UI maps the whole
+        // big cluster (prime + gold) to Performance and Silver to Efficiency.
+        clusters: &[(CoreKind::Performance, 4), (CoreKind::Efficiency, 4)],
+        uarch: "Kryo 485",
+        lithography: "7 nm",
+        core_naming: CoreNaming::PerformanceEfficiency,
+    },
+    ChipProfile {
         id: "SDM850",
         name: "Snapdragon 850",
         model_match: "snapdragon850",
@@ -735,7 +755,7 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 /// part purely because its clock happens to land near 3.0 GHz. Each of these
 /// chips already has its own Stage A token in `CHIPS`; this only matters as
 /// a second line of defense.
-const LEGACY_GUARD_TOKENS: &[&str] = &["835", "850", "7c", "8c", "sq1", "sq2", "sq3"];
+const LEGACY_GUARD_TOKENS: &[&str] = &["835", "850", "855", "7c", "8c", "sq1", "sq2", "sq3"];
 
 /// Stage B: Snapdragon X family + subfamily from the CPU name; if the name
 /// carries no usable text at all, fall back to the registry `Identifier`'s
@@ -1503,6 +1523,48 @@ mod tests {
         assert_eq!(d850.profile.tier_badge(CoreKind::Efficiency), ("E", "Efficiency core"));
         let s835 = identity_with_vendor("Snapdragon 835 @ 2.45 GHz", "Qualcomm Technologies Inc", 8);
         assert_eq!(match_profile(&s835).profile.model, "MSM8998");
+    }
+
+    #[test]
+    fn legacy_snapdragon_855_surface_duo_name_matches_sm8150() {
+        // Exact `ProcessorNameString` from the Surface Duo's Snapdragon 855.
+        // Normalization drops the parenthesized "(TM)", so this still matches
+        // the profile's `snapdragon855` token.
+        let id = identity_with_vendor(
+            "Snapdragon (TM) 855 @ 2.84 GHz",
+            "Qualcomm Technologies Inc",
+            8,
+        );
+        let d = match_profile(&id);
+        assert_eq!(d.profile.name, "Snapdragon 855");
+        assert_eq!(d.profile.model, "SM8150");
+        assert_eq!(d.basis, MatchBasis::SkuToken);
+        assert_eq!(d.profile.uarch, "Kryo 485");
+        assert_eq!(d.profile.lithography, "7 nm");
+        assert_eq!(d.profile.boost_ghz, 2.84);
+        assert_eq!(d.profile.total_cores(), 8);
+        assert_eq!(d.profile.clusters, &[(CoreKind::Performance, 4), (CoreKind::Efficiency, 4)]);
+        assert_eq!(d.profile.tier_badge(CoreKind::Performance), ("P", "Performance core"));
+        assert_eq!(d.profile.tier_badge(CoreKind::Efficiency), ("E", "Efficiency core"));
+    }
+
+    #[test]
+    fn legacy_855_format_without_tm_mark_still_matches() {
+        let id = identity_with_vendor("Snapdragon 855 @ 2.84 GHz", "Qualcomm Technologies Inc", 8);
+        assert_eq!(match_profile(&id).profile.model, "SM8150");
+    }
+
+    #[test]
+    fn unanticipated_legacy_855_format_is_guarded_from_x1_misfire() {
+        // Same defense as the 850 guard test: if a firmware string doesn't
+        // yield the exact "snapdragon855" token, the legacy guard must still
+        // keep an 8-core ~2.84 GHz part from being inferred as a Snapdragon X
+        // 8-core (3.0 GHz — inside the 180 MHz inference tolerance).
+        let id = identity_with_vendor("Snapdragon Turbo 855 Special Edition", "Qualcomm Technologies Inc", 8);
+        let d = match_profile(&id);
+        assert_eq!(d.profile.name, "Snapdragon (legacy)");
+        assert_ne!(d.profile.model, "X1-26-100");
+        assert_eq!(d.basis, MatchBasis::FamilyOnly);
     }
 
     #[test]

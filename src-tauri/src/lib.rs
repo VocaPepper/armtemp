@@ -1,4 +1,4 @@
-//! ARMtemp — native Snapdragon X temperature monitor (Tauri 2 backend).
+//! ARMtemp — native Snapdragon X / X2 and Snapdragon 855 temperature monitor (Tauri 2 backend).
 //!
 //! Wires the native PDH-backed sensor provider to a polling loop that emits a
 //! `sensor-update` event each tick, manages the live tray icon, and exposes

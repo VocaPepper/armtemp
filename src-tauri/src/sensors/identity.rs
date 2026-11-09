@@ -89,13 +89,23 @@ impl CpuIdentity {
         self.name.as_deref().unwrap_or("").to_lowercase()
     }
 
-    /// Keep only ASCII alphanumerics, lowercased — immune to hyphens, spaces,
-    /// and "(R)"/"(TM)" marks that vary across OEM firmware.
+    /// Keep only ASCII alphanumerics, lowercased, outside parenthesized
+    /// trademark marks — immune to hyphens, spaces, and "(R)"/"(TM)" marks
+    /// that vary across OEM firmware. Removing the parenthesized text is what
+    /// lets "Snapdragon (TM) 855" normalize to "snapdragon855" instead of
+    /// "snapdragontm855".
     pub fn normalized_name(&self) -> String {
-        self.name_lower()
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .collect()
+        let mut depth = 0u32;
+        let mut out = String::new();
+        for c in self.name_lower().chars() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                c if depth == 0 && c.is_ascii_alphanumeric() => out.push(c),
+                _ => {}
+            }
+        }
+        out
     }
 }
 
@@ -211,7 +221,9 @@ mod tests {
     fn normalized_name_strips_marks_and_lowercases() {
         let mut id = CpuIdentity::default();
         id.name = Some("Snapdragon(R) X2 Elite - X2E-78-100".into());
-        assert_eq!(id.normalized_name(), "snapdragonrx2elitex2e78100");
+        assert_eq!(id.normalized_name(), "snapdragonx2elitex2e78100");
+        id.name = Some("Snapdragon (TM) 855 @ 2.84 GHz".into());
+        assert_eq!(id.normalized_name(), "snapdragon855284ghz");
     }
 
     #[test]

@@ -2,15 +2,15 @@
 
 # ARMtemp
 
-**A native temperature monitor for Snapdragon X / X2 processors on Windows on ARM.**
+**A native temperature monitor for Snapdragon X / X2 and Snapdragon 855 processors on Windows on ARM.**
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20on%20ARM64-0078D4)
 ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)
-![Version](https://img.shields.io/badge/version-0.4.6-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 
 </div>
 
-ARMtemp reads real ACPI thermal-zone sensors and displays a single honest CPU temperature plus genuinely per-core utilization — recreating the [Core Temp](https://www.alcpu.com/CoreTemp/) experience for the Snapdragon X family (X1/X1P/X1E, X2/X2P/X2E — Qualcomm Oryon). Snapdragon X exposes no per-core temperature sensor, so ARMtemp doesn't pretend to have one: temperature is reported for the CPU as a whole, and per-core rows show real per-core load instead. Built as a small native ARM64 binary (Tauri 2 + Rust + React), with a live system-tray icon, mini mode, and overheat protection.
+ARMtemp reads real ACPI thermal-zone sensors and displays a single honest CPU temperature plus genuinely per-core utilization — recreating the [Core Temp](https://www.alcpu.com/CoreTemp/) experience for the Snapdragon X family (X1/X1P/X1E, X2/X2P/X2E — Qualcomm Oryon) and the legacy Snapdragon 855 (SM8150, Kryo 485). These SoCs expose no per-core temperature sensor, so ARMtemp doesn't pretend to have one: temperature is reported for the CPU as a whole, and per-core rows show real per-core load instead. Built as a small native ARM64 binary (Tauri 2 + Rust + React), with a live system-tray icon, mini mode, and overheat protection.
 
 > This is a from-scratch native app ported from a Claude/Design-Component mockup (`docs/claude-design-output/`), which was a *simulated* Windows-desktop preview. All live data here is **real**; no readings are fabricated. See [`SENSORS.md`](./SENSORS.md) for the full sensor discovery report.
 
@@ -39,9 +39,19 @@ ARMtemp reads real ACPI thermal-zone sensors and displays a single honest CPU te
 - Overheat protection — notify, sleep, or shut down at a configurable threshold
 - Close-to-tray, start-with-Windows, °C/°F, dark/light theme
 - A single NSIS installer that upgrades an existing install in place (see [Updating](#updating))
+- Chip profiles for Snapdragon X / X2 and legacy Qualcomm parts including Snapdragon 855 (SM8150), with the real P/E split determined from OS topology and per-core clocks
+
+**Verified hardware**
+
+- Snapdragon X Plus X1P-64-100 (Surface-class Windows 11 ARM64 machine) — original development target
+- Snapdragon 855 / SM8150 (Surface Duo, Windows 11 ARM64) — 46 thermal zones, real per-core load, P/E tier ordering verified against per-core clocks
+
+<p align="center">
+  <img src="docs/screenshots/snapdragon-855.png" width="360" alt="ARMtemp detecting a Snapdragon 855 / SM8150">
+</p>
 
 **Honest limitations (firmware, not by choice):**
-- **Per-core temperatures** aren't exposed by any userspace surface on Snapdragon X — the firmware exposes ~17 valid *zone* temperatures, not one per core. Rather than guess which zone maps to which core, ARMtemp reports one CPU temperature (the hottest valid zone) and shows genuinely per-core *load* instead. True per-core temps would need a signed kernel driver or private Surface/Qualcomm SMF IOCTLs.
+- **Per-core temperatures** aren't exposed by any userspace surface on these Snapdragon SoCs — the firmware exposes multiple *zone* temperatures, not one per core. Rather than guess which zone maps to which core, ARMtemp reports one CPU temperature (the hottest valid zone) and shows genuinely per-core *load* instead. True per-core temps would need a signed kernel driver or private Surface/Qualcomm SMF IOCTLs.
 - **Voltage and package power** aren't exposed; those fields show `—` rather than a fabricated number.
 
 ---
@@ -75,7 +85,7 @@ ARMtemp reads real ACPI thermal-zone sensors and displays a single honest CPU te
 
 ## How it reads sensors (the important part)
 
-Reading temperatures on Snapdragon X under Windows is genuinely hard — the standard WMI classes (`MSAcpi_ThermalZoneTemperature`, `Win32_TemperatureProbe`) return **nothing** on this firmware, and LibreHardwareMonitor has no native Oryon support.
+Reading temperatures on Snapdragon X / 855 under Windows is genuinely hard — the standard WMI classes (`MSAcpi_ThermalZoneTemperature`, `Win32_TemperatureProbe`) return **nothing** on this firmware, and LibreHardwareMonitor has no native Oryon/Kryo support.
 
 ARMtemp's working data source is the **`Thermal Zone Information`** performance-counter object, which exposes ACPI thermal zones (`\_SB.TZxx`). Sentinels/inactive zones (≤ 0 °C) are filtered out; the rest are converted from Kelvin to °C. The hottest valid zone is reported as the single CPU temperature — there is no per-core thermal surface on this firmware, so ARMtemp doesn't attribute a temperature to any individual core; per-core rows show real per-core load instead.
 

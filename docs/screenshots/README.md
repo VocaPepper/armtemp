@@ -13,5 +13,6 @@ Referenced by the repo's top-level `README.md`:
 - `settings-notification-area.png` — Settings → Notification Area tab (tray font weight + ° symbol options)
 - `settings-taskbar.png` — Settings → Windows Taskbar tab
 - `tray-icon.png` — the live tray icon and tooltip in the Windows notification area
+- `snapdragon-855.png` — the real app on a Surface Duo / Snapdragon 855 (SM8150), showing the detected profile and P/E core tiers
 
 PNG, no fixed size requirement — the README scales them for display.

@@ -168,7 +168,7 @@ failure described in §7.
   4. Family recognized but no SKU candidate fits (unreleased part): label the family
      honestly with `boost_ghz` from the real measured clock — never "Generic".
   5. A known non-Snapdragon-X vendor/family (legacy Qualcomm Kryo chips — Snapdragon
-     835/850/7c family/8c family/8cx family, Microsoft SQ1-3; Broadcom; MediaTek;
+     835/850/855/7c family/8c family/8cx family, Microsoft SQ1-3; Broadcom; MediaTek;
      NVIDIA) but no specific SKU token matched: honest vendor/family label, never an
      invented spec.
   6. Nothing recognized at all: the real `VendorIdentifier` (e.g. "Broadcom CPU") or
@@ -186,7 +186,7 @@ failure described in §7.
     wrong noun for a chip with no efficiency cores).
   - **Snapdragon X2 family**: badges **"P"**/**"P2"**, tooltips "Prime core"/"Performance
     core" — Qualcomm's own X2 vocabulary; still no "Efficiency" cluster name.
-  - **Legacy Kryo-based Qualcomm chips** (835/850/7c/8c/8cx families, Microsoft SQ1-3),
+  - **Legacy Kryo-based Qualcomm chips** (835/850/855/7c/8c/8cx families, Microsoft SQ1-3),
     and any other genuinely hybrid/unrecognized ARM64 chip: badges **"P"**/**"E"** — this
     *is* accurate vocabulary for those, since they're real big.LITTLE designs (e.g.
     Kryo "Gold"/"Silver", or Cortex-X1C/A78C on 8cx Gen 3 / SQ3).
@@ -220,4 +220,59 @@ and produces complete, real data (CPU identity, all 36 thermal zones, per-core l
 Trade-off: one `powershell.exe` child process per ~2s tick (~50–150ms). Acceptable
 for a monitor; the COM path is retained in `sensors/provider.rs` (excluded from the
 build) for a future dedicated-subprocess or kernel-driver approach.
+
+---
+
+## 8. Snapdragon 855 verification (Surface Duo)
+
+Probed on: **Snapdragon 855 @ 2.84 GHz** (SM8150, Kryo 485), **Surface Duo**,
+**Windows 11 Pro Build 26100, ARM 64-bit**, using the same commands as the X1
+machine.
+
+### What works
+
+- **Thermal zones:** the same `Thermal Zone Information` PDH object exists and
+  returns **46 zones** on this firmware, including `\_SB.TZ0`–`TZ3` at
+  314–317 K (41–44 °C) at idle. The ACPI names are not self-describing, but the
+  standard filtering and hottest-valid-zone rule works unchanged. Standard WMI
+  `MSAcpi_ThermalZoneTemperature` is empty here too.
+- **Per-core load:** `Processor Information` gives real load for all 8 logical
+  cores.
+- **CPU identity:** `ProcessorNameString` is the real
+  `Snapdragon (TM) 855 @ 2.84 GHz`; `VendorIdentifier` is
+  `Qualcomm Technologies Inc`; `Identifier` is
+  `ARMv8 (64-bit) Family 8 Model 805 Revision D0E`.
+
+### Why the token is `snapdragon855`
+
+The real Surface Duo string contains a trademark mark between the name and
+model number: `Snapdragon (TM) 855 @ 2.84 GHz`. Normalization now drops
+parenthesized marks before matching, so the string becomes
+`snapdragon855284ghz` and matches the profile's `snapdragon855` token. This is
+also why `855` is in `LEGACY_GUARD_TOKENS`: an unanticipated string format
+still cannot fall through to the Snapdragon X 8-core inference.
+
+### Per-core topology quirk (important)
+
+Unlike Snapdragon X, the numeric `EfficiencyClass` is **inverted** on this
+firmware:
+
+| Cores | Real cluster | `~MHz` | `EfficiencyClass` |
+|-------|--------------|--------|-------------------|
+| 0–3 | Kryo 485 Gold (1× 2.84 GHz prime + 3× 2.42 GHz) | 1632 | **0** |
+| 4–7 | Kryo 485 Silver (1.78 GHz) | 710 / 826 | **1** |
+
+Taking the highest class as "Performance" would therefore badge the Silver
+efficiency cores **P** and the Gold performance cores **E**. `core_tiers.rs` now
+resolves the faster class from the average real `~MHz` of each class, falling
+back to the old highest-class rule only when the clock list is unavailable.
+This preserves the existing X1/X2 behaviour (their higher class really is
+faster) while fixing the 855.
+
+### Detection result
+
+The profile is `Snapdragon 855` / `SM8150`, Kryo 485, 7 nm, 2.84 GHz boost,
+8 cores split 4 Performance + 4 Efficiency (the two-tier UI folds the prime
+core into the Performance cluster). Package power remains unavailable, as on
+the X1 firmware, and is shown as `—`.
 

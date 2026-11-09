@@ -7,7 +7,7 @@
 - Run Rust check (no codegen): `cargo check --manifest-path src-tauri/Cargo.toml`
 - Run linter: `cargo clippy --manifest-path src-tauri/Cargo.toml`
 ## Project overview
-ARMtemp is a native temperature monitor for Snapdragon X / X2 processors (Qualcomm Oryon) on Windows on ARM (ARM64). Built with Tauri 2 (Rust backend) + React 18 (TypeScript frontend), it reads real on-die thermal sensors via ACPI thermal zones and displays per-core temperatures, loads, and power. The app recreates the Core Temp experience for the Snapdragon X family, with a live system-tray icon, mini-mode, and classic Win32-style dialogs: a 4-tab Settings dialog (General / Display / Notification Area / Windows Taskbar, native checkboxes, OK/Cancel/Apply), a separate Overheat protection dialog (Options menu), and an About dialog (Help menu). All telemetry is strictly real — no simulated or fallback values anywhere.
+ARMtemp is a native temperature monitor for Snapdragon X / X2 processors (Qualcomm Oryon) and legacy Snapdragon 855 (SM8150, Kryo 485) on Windows on ARM (ARM64). Built with Tauri 2 (Rust backend) + React 18 (TypeScript frontend), it reads real on-die thermal sensors via ACPI thermal zones and displays a single CPU temperature, per-core loads, and power. The app recreates the Core Temp experience for these Snapdragon families, with a live system-tray icon, mini-mode, and classic Win32-style dialogs: a 4-tab Settings dialog (General / Display / Notification Area / Windows Taskbar, native checkboxes, OK/Cancel/Apply), a separate Overheat protection dialog (Options menu), and an About dialog (Help menu). All telemetry is strictly real — no simulated or fallback values anywhere.
 ## Development workflow discipline
 - **CRITICAL**: NEVER commit or push changes without explicit user approval
 - **ALWAYS** ask for user confirmation before any git operations
@@ -129,7 +129,7 @@ Users can always override AI agent version decisions:
 - `src/app/` - TypeScript types, theme tokens, hooks (useSettings, useSensors)
 - `src/components/` - React components (MenuBar, ProcessorInfo, TempTable, SettingsDialog, OverheatDialog, AboutDialog, MiniMode)
 - `src-tauri/src/` - Rust backend (lib.rs = app wiring, sensors/ = telemetry)
-- `src-tauri/src/sensors/` - Sensor providers (pdh.rs = primary, identity.rs = raw CPU identity signals from the registry/topology, chips.rs = profiles + detection, tray.rs = color/mode logic, tray_render.rs = Windows GDI digit rendering, types.rs = data shapes)
+- `src-tauri/src/sensors/` - Sensor providers (pdh.rs = primary, core_tiers.rs = pure EfficiencyClass→P/E resolution with clock fallback, identity.rs = raw CPU identity signals from the registry/topology, chips.rs = profiles + detection, tray.rs = color/mode logic, tray_render.rs = Windows GDI digit rendering, types.rs = data shapes)
 - `tools/` - Phase 0 sensor probe scripts (PowerShell) + icon generator
 ## Real-data contract (CRITICAL)
 - **All telemetry must be REAL.** No simulated, random, or fallback values anywhere.
@@ -138,7 +138,7 @@ Users can always override AI agent version decisions:
 - There is no true per-core temperature sensor on this firmware. ARMtemp does NOT invent per-core temperatures by mapping zones to cores — it shows one honest CPU temperature (the hottest valid zone, with session Min/Max/Avg) plus genuinely per-core LOAD. This is documented in the About tab / README; do not imply per-core temperature sensing anywhere in the UI.
 - Package power is genuinely unavailable from userspace on this firmware (confirmed empty PDH/WMI power counter) — show `—`, do not wire up a fake value.
 - Read counters natively via PDH (`sensors/pdh.rs`). Do NOT reintroduce the `wmi` crate's COM/`IWbemServices` query path — it fails with `WBEM_E_NOT_FOUND` under Tauri (see `SENSORS.md` §7 for that history).
-- **Core-tier badges must never misrepresent real silicon.** Never hardcode `kind === "efficiency" ? "E" : "P"` in the frontend — always use the per-core `kind_label`/`kind_title` the backend computes from `ChipProfile::tier_badge`. Snapdragon X1 has no efficiency cores at all (badge all "P"); Snapdragon X2's own vocabulary is "Prime"/"Performance" (badge "P"/"P2"), never "Efficiency"; only genuinely hybrid chips (legacy Kryo-based Qualcomm, other real big.LITTLE designs) get an honest "P"/"E". The two-tier `CoreKind` grouping itself (from real OS `EfficiencyClass` topology) stays accurate and is never invented — only the *display vocabulary* is per-family.
+- **Core-tier badges must never misrepresent real silicon.** Never hardcode `kind === "efficiency" ? "E" : "P"` in the frontend — always use the per-core `kind_label`/`kind_title` the backend computes from `ChipProfile::tier_badge`. Snapdragon X1 has no efficiency cores at all (badge all "P"); Snapdragon X2's own vocabulary is "Prime"/"Performance" (badge "P"/"P2"), never "Efficiency"; only genuinely hybrid chips (legacy Kryo-based Qualcomm, other real big.LITTLE designs) get an honest "P"/"E". The two-tier `CoreKind` grouping itself (from real OS `EfficiencyClass` topology) stays accurate and is never invented — only the *display vocabulary* is per-family. On Snapdragon 855 the OS class numbering is inverted relative to Snapdragon X, so `core_tiers.rs` resolves the faster class from per-core `~MHz` (falling back to the highest class only when clocks are unavailable).
 - **Detection covers non-Qualcomm boards too** (Raspberry Pi under community Windows-on-ARM builds, etc.) — the app's chip table and vendor fallbacks are not Snapdragon-only. A vendor/model this app doesn't recognize must still get an honest, vendor-derived label (e.g. "Broadcom CPU") — never "Snapdragon Generic" for a chip that isn't a Snapdragon.
 ## Main window layout structure
 The application displays all sensor information in a single window matching Core Temp's actual layout:
@@ -181,7 +181,7 @@ The application displays all sensor information in a single window matching Core
 - **PowerShell `$_` mangling** (only relevant to the historical `tools/*.ps1` probe scripts, not the app itself): running PowerShell via `bash -c "powershell -Command '...$_...'"` corrupts variables. Invoke those scripts with `-File`.
 - Polling interval default: 1500ms (configurable in Settings → General)
 ## Testing
-- Manual testing required for sensor data (real hardware only — runs on Snapdragon X machines)
+- Manual testing required for sensor data (real hardware only — runs on Snapdragon X and Snapdragon 855 machines)
 - Test temperature unit toggle (°C/°F) updates everywhere (table, status bar, tray)
 - Test the tray icon shows the CPU temperature and updates live
 - Test settings persistence across restart
